@@ -1,0 +1,7 @@
+numpy
+scipy
+matplotlib
+opencv-python
+pytorch-msssim
+tqdm
+python-dotenv

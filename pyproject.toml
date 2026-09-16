@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "holotwin"
+version = "1.0.0"
+description = "Differentiable digital twin for Fraunhofer holographic optical systems (CITL calibration + CGH)"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "scipy",
+    "matplotlib",
+    "opencv-python",
+    "pytorch-msssim",
+    "tqdm",
+    "python-dotenv"
+]
+
+# Vendor hardware SDKs (Santec SLM, Thorlabs camera) aren't on PyPI, so they
+# can't be listed as normal dependencies. Those must be installed separately 
+# -- see README. Everything under src/twin, src/training, src/cgh, src/loss 
+# works without them.
+# Install with: python -m pip install -e ".[vendor]"
+# If the vendor dependencies are in specific locations, we can add a .pth file into the 
+# .venv site-packages to point to the vendor SDKs, or add them to PYTHONPATH in the .env file.
+
+[project.optional-dependencies]
+vendor = [
+    "pandas",
+    "pylablib"
+]
+
+mac = [
+    "cairosvg"
+]
+
+# The import style is `from src.twin.model import ...`, i.e. `src` itself
+# is the package name (this repo isn't using the nested src/<pkgname>/
+# layout). This just tells setuptools to package `src` and everything
+# under it as-is, so `pip install -e .` exposes exactly the right import paths.
+[tool.setuptools.packages.find]
+include = ["src*"]
