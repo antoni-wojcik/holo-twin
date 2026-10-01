@@ -1,6 +1,8 @@
 # holo-twin
 
-A differentiable digital twin of a Fraunhofer (far-field) holographic optical system (SLM - free-space propagation - camera), implemented in PyTorch. The model itself lives in `src/twin/model.py` (`HoloSystem`, built from an `OpticsGeometry`) and learns the system's physical parameters directly from (greyscale hologram, monochrome camera image) pairs, with only the initial optical geometry estimate needed:
+Differentiable model of a Fraunhofer (far-field) holographic system (SLM - free-space propagation - camera), and the supporting code to reproduce the results in "Digital twin for full field-of-view Fraunhofer holographic patterning".
+
+The model itself lives in `src/twin/model.py` (`HoloSystem`, built from an `OpticsGeometry`) and learns the system's physical parameters directly from (greyscale hologram, monochrome camera image) pairs, with only the initial optical geometry estimate needed:
 
 1. Greyscale voltage-phase look-up table (LUT) response
 2. Effective incident field (laser beam profile + SLM curvature + dust)
