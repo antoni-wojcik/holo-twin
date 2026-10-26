@@ -1,162 +1,137 @@
 # holo-twin
 
-Differentiable model of a Fraunhofer (far-field) holographic system (SLM - free-space propagation - camera), and the supporting code to reproduce the results in "Digital twin for full field-of-view Fraunhofer holographic patterning".
+Differentiable digital twin of a Fraunhofer (far-field) holographic projector (SLM - Fourier lens - camera), and the code used to produce the results in "Digital twin for full field-of-view holographic patterning".
 
-The model itself lives in `src/twin/model.py` (`HoloSystem`, built from an `OpticsGeometry`) and learns the system's physical parameters directly from (greyscale hologram, monochrome camera image) pairs, with only the initial optical geometry estimate needed:
+The model (`HoloSystem` in `src/twin/model.py`) learns the physical parameters of the system from pairs of (greyscale hologram, camera image). Each of the parameters is a separate, independently enable/disable-able module (see `ModuleFlags` in `src/twin/model.py`: `lut`, `slm_field`, `pixel`, `pupil`, `background`, `camera`):
 
-1. Greyscale voltage-phase look-up table (LUT) response
-2. Effective incident field (laser beam profile + SLM curvature + dust)
-3. Pixel crosstalk, fill factor and deadspace effects
-4. Pupil aberrations (Seidel + tip/tilt)
-5. Stray light background field
-6. Camera affine transform and saturation response
+1. Greyscale-to-phase look-up table (LUT)
+2. Effective incident field on the SLM (beam profile, SLM curvature, dust)
+3. Pixel crosstalk, fill factor and deadspace
+4. Pupil aberrations
+5. Stray light background
+6. Camera affine transform and saturation
 
-Each of these is a separate, independently enable/disable-able module (see `ModuleFlags` in `src/twin/model.py`: `lut`, `slm_field`, `pixel`, `pupil`, `background`, `camera`). The physics is described in the paper; this repo is the implementation.
+The physics and the training procedure are described in the Methods section of the paper and the Supplementary Information.
 
-Everything else in the repository is training and experiment code built around that model: capturing real hardware data, training the twin against it (or against a known simulated ground truth), and generating/projecting holograms with a trained twin - this is what produced the paper's results and figures.
+- Code: https://github.com/antoni-wojcik/holo-twin 
+- Data and reference trained twins: https://doi.org/10.17863/CAM.134536
 
-## Layout
+## Repository layout
 
-| Path | What it is |
+| Path | Contents |
 |---|---|
-| `src/twin/` | The optical model itself (`HoloSystem`), built from modular per-effect submodules |
-| `src/training/` | The training pipeline: stages (camera - optics - background), losses, convergence plotting |
-| `src/acquisition/` | Hardware data capture: patterns, acquisition loop |
-| `src/cgh/` | Hologram generation/projection using a trained twin |
-| `src/hardware/` | SLM/camera driver interfaces, plus vendor implementations (Santec, Thorlabs) |
-| `src/loss/` | Loss functions and regularisation |
-| `src/io/` | Config save/load and experiment output handling (`ExpIO`) |
-| `pipelines/exp/` | Experimental workflows: acquire real data, train a twin on it, run CGH |
-| `pipelines/sim/` | Simulation-only counterparts: build a randomized ground-truth twin, fit an independently-initialized twin against it, and run/evaluate CGH against that known ground truth |
+| `src/twin/` | The optical model (`HoloSystem`, `OpticsGeometry`, `ModuleFlags`) |
+| `src/training/` | Staged training (camera → optics → background), ground-truth builder for simulation |
+| `src/cgh/` | Hologram optimisation against a trained twin |
+| `src/acquisition/` | Training patterns, hardware acquisition loop, loading acquired data |
+| `src/hardware/` | `ISLM` / `ICamera` interfaces and an ideal (simulated) SLM and camera |
+| `src/loss/`, `src/io/`, `src/utils/` | Losses, config/output handling, helpers |
+| `pipelines/sim/` | Simulation only: build a random ground-truth system, fit a twin to it, run CGH |
+| `pipelines/exp/` | Experiment: acquire data, fit a twin to it, run CGH and capture the result |
+| `studies/` | The acquisition, training and CGH runs used in the paper |
+| `analysis/` | Notebooks that make the paper figures |
 
-Each pipeline script is a thin, self-contained entry point: a `DEFAULT_CONFIG` at the top and a `run(cfg)` function underneath that does the work. To change what a run does, change the config values passed to `run()` - directly, or via
-`dataclasses.replace(DEFAULT_CONFIG, ...)` - the pipeline body itself shouldn't need to change. This is what makes it straightforward to run several configs in a loop, or chain pipelines together (e.g. `run_experiment.ipynb`, which chains acquisition - training - CGH end-to-end), without touching pipeline code.
+Each pipeline script has a `DEFAULT_CONFIG` at the top and a `run(cfg)` function. To change a run, edit the config. Every run writes to its own folder `DATA_ROOT/<date>_<exp_base_name>/<exp_name>/`, with the `config.json` that produced it. `DATA_ROOT` is `data/` in the repo by default and can be changed with `DATA_DIR_ROOT` in a `.env` file at the repo root (see `src/config.py`).
 
-A single `train_twin()` routine (in `src/training/`) drives all staged training - camera, then optics, then background - with the same routine used for both simulation and real data; only the data source and loss masking differ. Each stage uses a cosine warmup/decay LR schedule per parameter group.
+## 1. System requirements
 
-CGH (`src/cgh/`) optimizes a greyscale hologram (or batch, for time-multiplexed display) against a trained twin to reproduce a target intensity pattern. The same optimize-or-reload logic is used in both pipelines, so a previously-generated hologram can be redisplayed (e.g. at a different exposure) without recomputing it - see `cfg.compute=False` +
-`cfg.holo_path` in the CGH configs.
+Tested on:
+- Windows 10, Python 3.12.0
+- PyTorch 2.13.0 + CUDA 12.6 (torchvision 0.28.0)
+- NVIDIA GTX 1080 (8 GB VRAM); also run on RTX 3080 to RTX 5090 GPUs
 
-## Config and output
+Required Python packages (`pyproject.toml`): numpy, scipy, matplotlib, opencv-python, pytorch-msssim, tqdm, python-dotenv, plus PyTorch. Python ≥ 3.10. The full environment used for the paper, with exact versions, is in `requirements-lock.txt`. It includes Jupyter and hardware-control packages that are not needed to run the simulation or training.
 
-Every pipeline's config is a dataclass (`TrainingConfig`, `AcquisitionConfig`, etc., subclassing `BaseConfig` in `src/io/base_config.py`), saved and loaded as plain JSON.
+Hardware:
+- **Simulation** (`pipelines/sim/`) runs on CPU and needs no special hardware.
+- **Training a twin on the experimental data** needs an NVIDIA GPU. The code was written to fit in 8 GB VRAM.
+- **Acquisition and displaying holograms** (`pipelines/exp/acquire_data.py`, `pipelines/exp/run_cgh.py`) need the optical setup described in the Methods: HeNe laser (632.8 nm, Melles Griot 05-LHP-151), Santec SLM-200 phase-only LCoS SLM (1920 × 1200, 8 µm pitch), Thorlabs AC254-100-A Fourier lens (f = 100 mm), Thorlabs Kiralux CS126MU camera (3.45 µm pitch). Drivers for the SLM and camera are included:
+  - Camera (`src/hardware/camera_thor/camera_cs126mu.py`): needs `pip install -e ".[vendor]"` (pylablib) and Thorlabs' camera software (ThorCam) installed.
+  - SLM (`src/hardware/slm_santec/slm.py`, Windows only): copy `_slm_win.py`, `SLMFunc.dll` and `FTD3XX.dll` from the Santec SLM SDK into `src/hardware/slm_santec/`. These vendor files are not included in this repository.
 
-Each run gets its own output directory via `ExpIO` (`src/io/data_io.py`), rooted at `DATA_ROOT`: `DATA_ROOT/<date>_<experiment-base-name>/<run-name>/`. The first run of a given name gets that bare name; re-running with the same name appends `_1`, `_2`, ... rather than overwriting. Every run directory contains the `config.json` that produced it, alongside whatever else it saved - model checkpoints, loss/convergence plots, and (for training runs) per-stage field maps and reports. A downstream pipeline can pick up an upstream run's output by pointing a config field at its path relative to `DATA_ROOT` (e.g. an `ExpTrainingConfig.acquisition_path` pointing at an acquisition run, or a CGH config's `twin_path` pointing at a training run's checkpoint).
+  To use other hardware, write SLM and camera classes that implement `ISLM` (`src/hardware/islm.py`) and `ICamera` (`src/hardware/icamera.py`), and import them in place of the Santec/Thorlabs classes at the top of those two scripts.
 
-## Install
-
-Requires Python >=3.10.
-
-**1. Clone the repo and create a virtual environment:**
+## 2. Installation
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/antoni-wojcik/holo-twin
 cd holo-twin
 python -m venv .venv
-```
-
-Activate it:
-- Windows (PowerShell): `.venv\Scripts\Activate.ps1`
-- Windows (cmd): `.venv\Scripts\activate.bat`
-- macOS/Linux: `source .venv/bin/activate`
-
-**2. Install PyTorch yourself, matched to your hardware, *before* installing this package:**
-
-```bash
+.venv\Scripts\activate            # Windows; on macOS/Linux: source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
-```
-
-(use whichever command matches your setup from [pytorch.org/get-started/locally](https://pytorch.org/get-started/locally/) - `cu126` above assumes a CUDA 12.6-compatible driver; check with `nvidia-smi` if you're not sure. Use the CPU-only command if you don't have a CUDA GPU.)
-
-`pyproject.toml` deliberately does **not** list `torch` as a dependency - it ships as several different builds (CPU-only, or CUDA 11.8/12.1/12.6/etc.), and `pip` has no way to know which one matches your driver. Installing it yourself first, in its own step, avoids `pip` silently reinstalling it with the wrong build later (e.g. replacing a working CUDA install with a CPU-only one).
-
-**3. Install this package:**
-
-```bash
 python -m pip install -e .
 ```
 
-This installs everything under `dependencies` in `pyproject.toml` plus this repo itself in editable mode, so `import src...` works from any script, notebook, or terminal in this environment - no `PYTHONPATH` configuration needed.
+Install PyTorch first, using the command for your system from [pytorch.org](https://pytorch.org/get-started/locally/) (the CPU-only build is enough for the simulation demo). `pyproject.toml` does not list `torch`, so that `pip install -e .` does not replace a CUDA build with a different one.
 
-If you would rather not install it as a package, `pip install -r requirements.txt` (after installing torch as above) and run scripts from the repo root instead - `requirements.txt` excludes torch for the same reason.
+Optional extras: `pip install -e ".[vendor]"` for the camera driver (see Section 1), `pip install -e ".[mac]"` for SVG loading on macOS. On Windows, SVG targets are loaded with Inkscape (path set in `src/config.py`). Neither is needed for the demos.
 
-### Hardware / vendor extras (optional)
+Typical install time: 5–10 minutes, almost all of it downloading PyTorch.
 
-Running the experimental acquisition/CGH pipelines (`pipelines/exp/`) against real hardware needs the vendor SLM and camera libraries (Santec SLM, Thorlabs camera) - these aren't on PyPI, so install them via the `vendor` extra:
+## 3. Demo
 
-```bash
-python -m pip install -e ".[vendor]"
-```
-
-(the quotes matter in bash/zsh - without them, `[vendor]` is interpreted as a shell glob pattern rather than passed to pip.) If a vendor SDK isn't pip-installable at all (just a folder the vendor ships, no PyPI package or wheel), add its path to `PYTHONPATH` via your local `.env` file instead of forcing it into `pyproject.toml` - see Environment below.
-
-Everything under `src/twin`, `src/training`, `src/cgh`, and `src/loss` - i.e. simulation, training, and CGH against a saved twin - works without the vendor extras, so simulation-only work doesn't need the hardware set up.
-
-### SVG handling (platform-specific)
-
-Loading SVG target images (`load_svg` in `src/io/img_handler.py`) needs an SVG rasterizer, and which one is used depends on your OS:
-
-- **Windows**: `cairosvg` is difficult to install here (it needs native Cairo libraries
-  with no simple pip wheel on Windows), so Inkscape is the default SVG backend. Install it separately from [inkscape.org](https://inkscape.org/) and make sure it's on your `PATH`.
-- **macOS**: `cairosvg` installs cleanly via pip. Install it with the `mac` extra:
-  `python -m pip install -e ".[mac]"`.
-
-`load_svg` picks the right backend automatically based on your platform - you just need the corresponding tool installed first. `config.py` (see Environment below) resolves the Inkscape path and checks whether `cairosvg` is available; this is also what the paper-figure-generation code uses to convert SVG panels to PDF.
-
-## Environment
-
-Machine-specific settings (where output goes, paths to the external tools above) are centralised in `config.py`, the one place in the project that reads `os.environ` directly - everything else imports the resolved values from it. It loads a `.env` file at the repo root via python-dotenv:
-
-```bash
-cp .env.example .env
-# then edit .env
-```
-
-falling back to a real environment variable if `.env` doesn't set one, then to a sensible default.
-
-The setting that matters day-to-day is the output root: set `DATA_DIR_ROOT` in `.env` to where you want experiment output written - `config.py` exposes this as `DATA_ROOT`, which `ExpIO` builds every run's output directory under (see "Config and output" above). If unset, it defaults to a `data/` folder at the repo root. `config.py` also resolves an Inkscape binary path (`INSKAPE_PATH`) and exposes `CAIROSVG_AVAILABLE`, both used by the SVG handling and paper-figure-generation code described above.
-
-## Quickstart
-
-**Simulation** - build a random ground truth, fit a twin against it, and run CGH:
+### A. Simulation (CPU, no data needed)
 
 ```bash
 python pipelines/sim/run_training.py
+```
+
+This builds a random ground-truth system on a small grid (160 × 200 SLM pixels), generates training data from it, and fits an independently initialised twin to it.
+
+Expected output: a folder `data/<date>_sim_experiment/twin_fit/` containing `ground_truth/` (the true model and its report) and one folder per training stage (`Camera/`, `Optics/`, `Background/`), each with `twin_model.pt`, a model report, loss and convergence plots, and sample true/predicted camera images. The fitted parameters are compared against the ground truth at the end, and the predicted and true camera images should match closely.
+
+Run time: roughly 5–10 minutes on a desktop CPU.
+
+To then run CGH with the fitted twin, replace `<date>` in `twin_path` and `ground_truth_path` in `pipelines/sim/run_cgh.py` with the date of your training run folder, and run:
+
+```bash
 python pipelines/sim/run_cgh.py
 ```
 
-Each script's `DEFAULT_CONFIG` controls what's run - for `run_training.py`, this includes which physical effects exist in the simulated ground truth and which twin parameters are held fixed, useful for isolating which module is responsible when convergence fails. Edit `DEFAULT_CONFIG` directly, or build a variant with `dataclasses.replace(DEFAULT_CONFIG, ...)` and pass it to `run()` yourself (e.g. in a notebook or a sweep script).
+Expected output: the optimised holograms, the target, and the image predicted by the twin and by the ground truth. Run time: a few minutes on CPU.
 
-**Experimental** - acquire hardware data, then fit and evaluate a twin against it:
+### B. Fitting a twin to the experimental data (GPU)
+
+1. Download `ap_4pi_training_data` from https://doi.org/10.17863/CAM.134536 and put it in `data/` (or your `DATA_ROOT`).
+2. In `pipelines/exp/run_training.py`, set `acquisition_path="ap_4pi_training_data"`.
+3. Run:
 
 ```bash
-python pipelines/exp/acquire_data.py
 python pipelines/exp/run_training.py
-python pipelines/exp/run_cgh.py
 ```
 
-As above, each script runs its own `DEFAULT_CONFIG` when run directly. To chain them - feeding an acquisition run's path into training, and a training run's checkpoint into CGH - build each config from the previous step's returned path rather than re-running with defaults; `run_experiment.ipynb` has a worked end-to-end example of this.
+By default, this fits all modules to 4 checkerboard, 1 mask and 150 random-hologram captures, and evaluates on 10 held-out captures (alternative sizes can be specified and have been explored in the article).
 
-Every run creates a dated, numbered folder under the data root (via `ExpIO`) containing model checkpoints, loss curves, model reports, and field maps for each training stage,
-plus the raw acquired/generated data.
+Expected output: `data/<date>_twin_fit/run/` with one folder per stage, as in demo A, and the validation losses printed at the end. The result can be compared with the reference twin trained on the same data, provided in `twin_fits/4p_ap_fit/ap_4pi` in the dataset. The losses are described in the paper.
 
-## Troubleshooting
+Run time on a GTX 1080: about 30 minutes (camera stage < 1 min, optics stage ~24 min, background stage ~5 min). On newer GPUs (RTX 3080 to RTX 5090), training and CGH take a few minutes.
 
-**`pip install -e .` (or some other install step) broke my PyTorch - `torch.cuda.is_available()` is suddenly `False`, or training that used to run on GPU now runs on CPU.**
+## 4. Use on your own data
 
-This means `torch` got reinstalled generically at some point instead of via the CUDA-matched command in step 2 of Install - e.g. `torch` was listed as a plain dependency somewhere, or a `pip install` in this environment pulled it in as a side effect of resolving some other package. Don't try to patch this in place; rebuild the environment from scratch:
+**Acquire data.** Implement `ISLM` and `ICamera` for your hardware (see Section 1), set the wavelength, exposures and number of samples in `pipelines/exp/acquire_data.py`, and run it. It writes:
 
-```bash
-deactivate
-rm -rf .venv                    # PowerShell: Remove-Item -Recurse -Force .venv
-python -m venv .venv
-.venv\Scripts\Activate.ps1      # or the activation command for your shell
-python -m pip install --upgrade pip
-python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
-python -m pip install -e .
+```
+checkers/   mask/   noise/   validation/
+   each containing holos/<i>.npy and captures/<i>.npy
 ```
 
-Check `nvidia-smi` for the CUDA version your driver actually supports and use the matching `--index-url` from pytorch.org's install page - don't assume `cu126` is correct for your machine.
+`holos/<i>.npy` are the displayed holograms as uint16 grey levels, 0 to `grayscale_range − 1`, at the full SLM size. `captures/<i>.npy` are the raw camera frames (uint16). Data from other sources can be used if it is saved in this layout.
 
-**General rule:** nothing in this environment should ever reinstall `torch` implicitly. If you add a new dependency later that happens to depend on `torch`, check what version/build it wants before installing it here, or test it in a throwaway venv first.
+**Train a twin.** In `pipelines/exp/run_training.py` set `acquisition_path`, `grayscale_range` (number of SLM grey levels, e.g. 1024 for a 10-bit SLM), and the `OpticsGeometry` for your system: `slm_pixels`, `slm_pixel_pitch`, `wavelength`, `focal_length`, `camera_shape` (the central camera region used for training), `camera_pixel_pitch` and `camera_exposure_time`. See `OpticsGeometry` in `src/twin/model.py` for all fields.
+
+**Generate holograms.** In `pipelines/exp/run_cgh.py` set `twin_path` to the trained `twin_model.pt` and the target (`pattern`, `target_path`), then run it. Set `compute=False` and `holo_path` to redisplay holograms you already generated. CGH of a batch of 4 full-resolution (1920 × 1200) holograms with all modules enabled took about 6.5 minutes on a GTX 1080, and a few minutes or less on RTX 3080 to RTX 5090 GPUs.
+
+## Reproducing the paper results
+
+- `studies/`: the scripts that ran each acquisition, training and CGH study in the paper (see `studies/README.md`). The data they produced is in the dataset at https://doi.org/10.17863/CAM.134536.
+- `analysis/analysis.ipynb`: figures in the main text.
+- `analysis/sim_analysis.ipynb`: simulation figures in the Supplementary Information.
+
+## License
+
+MIT, see `LICENSE`.
+
+## Citation
+
+If you use this code, please cite the paper: "Digital twin for full field-of-view holographic patterning" (under review). Code: https://github.com/antoni-wojcik/holo-twin. Data: https://doi.org/10.17863/CAM.134536.
