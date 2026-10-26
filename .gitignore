@@ -4,6 +4,10 @@ data/
 studies/_runs/
 src/hardware/*/**
 !src/hardware/ideal/**
+!src/hardware/camera_thor/camera_cs126mu.py
+!src/hardware/slm_santec/__init__.py
+!src/hardware/slm_santec/slm.py
+*.dll
 **/.DS_Store
 **/*.ipynb
 

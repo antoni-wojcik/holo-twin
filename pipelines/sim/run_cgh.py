@@ -15,8 +15,8 @@ from src.io.data_io import ExpIO, data_path
 # CONFIG -- change this to set up a new run
 # ===============================
 DEFAULT_CONFIG = SimCGHConfig(
-    twin_path="2026-07-08_sim_experiment_run/Background/twin_model.pt",       # last training stage's checkpoint
-    ground_truth_path="2026-07-08_sim_experiment_run/ground_truth/model_true.pt",
+    twin_path="<date>_sim_experiment/twin_fit/Background/twin_model.pt",       # last training stage's checkpoint
+    ground_truth_path="<date>_sim_experiment/twin_fit/ground_truth/model_true.pt",
     exp_base_name="sim_experiment", exp_name="cgh",
     exp_description="CGH on a trained sim twin, evaluated against ground truth.",
     pattern="circle",  # "circle" or "checkerboard"

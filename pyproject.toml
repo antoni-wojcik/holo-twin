@@ -17,17 +17,21 @@ dependencies = [
     "python-dotenv"
 ]
 
-# Vendor hardware SDKs (Santec SLM, Thorlabs camera) aren't on PyPI, so they
-# can't be listed as normal dependencies. Those must be installed separately 
-# -- see README. Everything under src/twin, src/training, src/cgh, src/loss 
-# works without them.
-# Install with: python -m pip install -e ".[vendor]"
-# If the vendor dependencies are in specific locations, we can add a .pth file into the 
-# .venv site-packages to point to the vendor SDKs, or add them to PYTHONPATH in the .env file.
+# Optional extras.
+#
+# vendor: Python packages for the hardware drivers in src/hardware/.
+#   - Thorlabs Kiralux camera (camera_thor/camera_cs126mu.py) uses pylablib,
+#     which also needs Thorlabs' camera software (ThorCam) installed.
+#   - The Santec SLM (slm_santec/slm.py) has no PyPI package: copy _slm_win.py,
+#     SLMFunc.dll and FTD3XX.dll from the Santec SDK into src/hardware/slm_santec/.
+#   Not needed for simulation, training or CGH (src/twin, src/training,
+#   src/cgh, src/loss).
+#   Install with: python -m pip install -e ".[vendor]"
+#
+# mac: cairosvg for loading SVG targets on macOS (Windows uses Inkscape).
 
 [project.optional-dependencies]
 vendor = [
-    "pandas",
     "pylablib"
 ]
 

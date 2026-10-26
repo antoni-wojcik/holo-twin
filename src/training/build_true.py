@@ -28,7 +28,6 @@ class GroundTruthConfig(BaseConfig):
     pipelines/sim/run_training.py to build a fresh one each run.
     """
     crosstalk_sigma: tuple = (0.5, 0.5)
-    pixel_fill: tuple = (0.95, 0.95)
     deadspace_reflectance: float = 0.9
     lut_scale: float = 4.4 * np.pi
     num_pupil_tiles: int = 20

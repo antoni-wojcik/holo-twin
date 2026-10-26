@@ -34,7 +34,6 @@ DEFAULT_CONFIG = SimTrainingConfig(
 
     ground_truth=GroundTruthConfig(
         crosstalk_sigma=(0.5, 0.5),
-        pixel_fill=(0.95, 0.95),
         deadspace_reflectance=0.9,
         lut_scale=4.4 * np.pi,
         num_pupil_tiles=20,
@@ -100,7 +99,6 @@ def run(cfg: SimTrainingConfig):
     model_true = build_ground_truth(
         cfg.geometry,
         crosstalk_sigma=gt.crosstalk_sigma,
-        pixel_fill=gt.pixel_fill,
         deadspace_reflectance=gt.deadspace_reflectance,
         lut_scale=gt.lut_scale,
         num_pupil_tiles=gt.num_pupil_tiles,
